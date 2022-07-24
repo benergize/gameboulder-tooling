@@ -1,0 +1,304 @@
+
+<!-- Editor DOM -->
+
+<input type = 'text' placeholder = 'GridMap Name' id = 'gmn'> <button onclick="generateSaveFile()">Save</button> <button>Open</button>
+<hr/>
+<label>Cell Width: <input type = 'number' id = 'x-cell-size' value = 16></label>
+<label>Cell Height: <input type = 'number' id = 'y-cell-size' value = 16></label> | 
+<label>Grid Width: <input type = 'number' id = 'x-grid-size' value = 640></label>
+<label>Grid Height: <input type = 'number' id = 'y-grid-size' value = 480></label>
+<hr/>
+<div style = 'display:flex;'>
+    <div id = 'object-menu'>
+        Objects:
+        <hr/>
+        <div id = 'object-list'>
+
+        </div>
+        <hr/>
+        <button onclick = "createNewObject()">+ Add Object</button>
+        <input type = 'file' id = 'picker' style = 'display:none;'>
+    </div>
+    <div id = 'room-grid-holder'>
+        <canvas id = 'c' width = 640 height = 480></canvas>
+        <div><br/><small>Left Click=Place Object | Right Click=Delete Object | Shift+Scroll=Change Selection</small></div>
+    </div>
+</div>
+<hr/>
+MOUSE POS: <input type = 'text' readonly id = 'mouse-pos-x'> <input type = 'text' readonly id = 'mouse-pos-y'>
+
+
+<!-- Make pretty -->
+<style> 
+    #object-menu { width:200px; display:inline-block;border:1px solid gray;}
+    #room-grid-holder {
+        background:lightgray;
+        padding:48px;
+        overflow:auto;
+    }
+    input[type="number"]{width:4em;}
+    html,body{margin:0px;}
+    #object-list label { display:flex; align-items: center;; }
+</style>
+
+
+<!-- Make it work -->
+<script>
+
+    let objectRegistry = {};
+    let ind = 0;
+    let symbolRot = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890-=!@#$%^&*()_+/[]{};:,.<>?☺☻♥♦♣♠•◘○♂▬~";
+    let symbolIndex = 0;
+
+    let presentIndexes = [];
+
+    let currentObjectSelection = 0;
+    function setObjectSelected(num) {
+        document.querySelector("#obj-entry-"+num+" input").checked = true;
+        currentObjectSelection = num;
+    }
+    function getObjectSelected() {
+        return objectRegistry[currentObjectSelection];
+    }
+
+    /* Object Stuff */
+    function createNewObject(name=false,image=false) {
+
+        objectRegistry[ind] = {};
+
+        let objName = name || prompt("Game Boulder object name (eg, obj_player):");
+        //image = image || prompt("Image URL:");
+
+        let picker = document.querySelector("#picker");
+        picker.value = "";
+        if(image == "") {
+            picker.click();
+
+            var thisInd = ind;
+            picker.onchange = function() {
+
+                if(picker.value != "") {
+                    document.querySelector("#obj-entry-" + thisInd + " img").src = URL.createObjectURL(picker.files[0]);
+                    objectRegistry[thisInd].image = document.querySelector("#obj-entry-" + thisInd + " img");
+                }
+            }
+        }
+
+        symbol = symbolRot[symbolIndex];
+        if(typeof symbol == 'undefined') { symbol = ind; }
+
+        let imgObj = new Image();
+        imgObj.src = image;
+        
+        objectRegistry[ind] = {'obj':objName,'image':imgObj,'symbol':symbol,'ind':ind};
+
+        let div = document.createElement("div");
+        div.id = 'obj-entry-' + ind;
+        div.innerHTML = `
+            <label><input type = 'radio' name = 'object-selector' value = "${symbol}" onchange = "setObjectSelected(${ind})"> <img src = '${image}' width = 16 height = 16> ${objName}</label>
+        `;
+        document.querySelector("#object-list").appendChild(div);
+
+        presentIndexes.push(ind);
+
+        setObjectSelected(ind);
+
+        ind++;
+        symbolIndex++;
+    }
+ 
+
+
+    /* Editor Stuff */
+
+    let canvas = document.querySelector("#c");
+    let ctx = canvas.getContext("2d");
+
+    gridData = [];
+
+    let cellDom = [
+        (document.querySelector("#x-cell-size")),
+        (document.querySelector("#y-cell-size")),
+        (document.querySelector("#x-grid-size")),
+        (document.querySelector("#y-grid-size"))
+    ];
+
+    cellDom.forEach(el=>{el.onkeyup=reflowGrid;el.onkeydown=reflowGrid;});
+
+    canvas.onmousewheel=ev=>{
+        console.log(ev);
+
+        if(ev.shiftKey) {
+
+            if(ev.deltaY > 0) {
+                if(currentObjectSelection < presentIndexes.length-1) {
+                    currentObjectSelection++;
+                }
+                else {
+                    currentObjectSelection = 0;
+                }
+            }
+            else if(ev.deltaY < 0) {
+                if(currentObjectSelection == 0) {
+                    currentObjectSelection = presentIndexes.length-1;
+                }
+                else {
+                    currentObjectSelection--;
+                }
+            }
+            setObjectSelected(currentObjectSelection);
+        }
+    }
+
+    canvas.onmousedown = function(ev) { canvas.onmousemove(ev); }
+    canvas.oncontextmenu = function(ev) { ev.preventDefault(); canvas.onmousemove(ev); }
+
+    canvas.onmousemove=ev=>{
+        let x = ev.offsetX;
+        let y = ev.offsetY;
+        
+        let cellWidth = parseInt(cellDom[0].value);
+        let cellHeight = parseInt(cellDom[1].value);
+
+        x = Math.floor(x/cellWidth);
+        y = Math.floor(y/cellHeight);
+
+        hoverCell(x,y);
+
+        if(ev.buttons == 1) {
+            gridData[y][x] = getObjectSelected().ind;
+
+            drawEditor();
+        }
+        else if(ev.buttons == 2) {
+            gridData[y][x] = " ";
+
+            drawEditor();
+        }
+    }
+
+    function hoverCell(x,y) {
+
+        document.querySelector("#mouse-pos-x").value = x;
+        document.querySelector("#mouse-pos-y").value = y;
+    }
+
+    function reflowGrid() { 
+
+        let cellWidth = parseInt(cellDom[0].value);
+        let cellHeight = parseInt(cellDom[1].value);
+        let gridWidth = parseInt(cellDom[2].value);
+        let gridHeight = parseInt(cellDom[3].value);
+
+        let xCells = Math.round(gridWidth/cellWidth);
+        let yCells = Math.round(gridHeight/cellHeight);
+
+        for(let y = 0; y < yCells; y++) {
+
+            if(!Array.isArray(gridData[y])) { gridData[y] = []; }
+
+            for(let x = 0; x < xCells; x++) {
+
+                if(typeof gridData[y][x] == 'undefined') { gridData[y][x] = " "; }
+
+            } 
+        }
+        canvas.width = Math.max(640, gridWidth);
+        canvas.height = Math.max(480, gridHeight);
+
+        drawEditor();
+        console.log(10);
+
+    
+    }
+
+    function drawEditor() {
+
+
+        let cellWidth = parseInt(cellDom[0].value);
+        let cellHeight = parseInt(cellDom[1].value);
+        let gridWidth = parseInt(cellDom[2].value);
+        let gridHeight = parseInt(cellDom[3].value);
+
+
+        let xCells = Math.round(gridWidth/cellWidth);
+        let yCells = Math.round(gridHeight/cellHeight);
+
+
+        ctx.fillStyle = "lightgray";
+        ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.strokeStyle = "white";
+
+        for(let y = 0; y < yCells; y++) {
+ 
+            for(let x = 0; x < xCells; x++) { 
+
+                if(gridData[y][x] != " ") {
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(x*cellWidth,y*cellHeight,cellWidth,cellHeight);
+
+                    ctx.drawImage(objectRegistry[gridData[y][x]].image,x*cellWidth,y*cellHeight,cellWidth,cellHeight);
+                    //ctx.drawImage(objectRegistry[gridData[y][x]].image,0,0,32,32);
+                }
+
+                ctx.strokeRect(x*cellWidth,y*cellHeight,cellWidth,cellHeight);
+            }
+        }
+    }
+
+    reflowGrid();
+
+    drawEditor();
+
+
+
+    function generateSaveFile() {
+
+        let gridMapName = document.querySelector('#gmn').value;
+
+        let cellWidth = parseInt(cellDom[0].value);
+        let cellHeight = parseInt(cellDom[1].value);
+        let gridWidth = parseInt(cellDom[2].value);
+        let gridHeight = parseInt(cellDom[3].value);
+
+
+        let xCells = Math.round(gridWidth/cellWidth);
+        let yCells = Math.round(gridHeight/cellHeight);
+
+        let usableMap = [];
+        for(let y = 0; y < yCells; y++) {
+
+            usableMap[y] = [];
+
+            if(Array.isArray(gridData[y])) {
+                for(let x = 0; x < xCells; x++) {
+
+                    if(typeof gridData[y][x] != "undefined") {
+                        
+                        usableMap[y][x] = gridData[y][x] == " " ? " " : objectRegistry[gridData[y][x]].symbol;
+                    }
+                }
+            }
+        }
+
+        let registry = {};
+        let editorData = JSON.parse(JSON.stringify(objectRegistry));
+        for(let v in objectRegistry) {
+            registry[objectRegistry[v].symbol] = objectRegistry[v].obj;
+            editorData[v].image = objectRegistry[v].image.src;
+
+        }
+
+        
+
+        let gridMapDeclaration = `new GridMap("${gridMapName}", ${cellDom[0].value},${cellDom[1].value},${JSON.stringify(usableMap)},${JSON.stringify(registry)},{"editorData":${btoa(JSON.stringify(editorData))}})`;
+
+
+        console.log(gridMapDeclaration);
+    }
+
+    window.addEventListener('beforeunload', function (e) {
+        e.preventDefault(); 
+        e.returnValue = '';
+    });
+</script>
